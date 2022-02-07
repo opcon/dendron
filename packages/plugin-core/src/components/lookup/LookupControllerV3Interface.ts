@@ -8,6 +8,7 @@ import {
   PrepareQuickPickOpts,
   ShowQuickPickOpts,
 } from "./utils";
+import { LookupView } from "../../views/LookupView";
 
 export interface ILookupControllerV3 {
   readonly quickpick: DendronQuickPickerV2;
@@ -21,6 +22,8 @@ export interface ILookupControllerV3 {
   nodeType: DNodeType;
 
   readonly provider: ILookupProviderV3;
+
+  readonly view: LookupView | undefined;
 
   /**
    * Wire up quickpick and initialize buttons
@@ -86,4 +89,8 @@ export type LookupControllerV3CreateOpts = {
    * 1.0 = match anything
    */
   fuzzThreshold?: number;
+  /**
+   * disable lookup view
+   */
+  disableLookupView?: boolean;
 };
