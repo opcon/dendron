@@ -93,4 +93,8 @@ export type LookupControllerV3CreateOpts = {
    * disable lookup view
    */
   disableLookupView?: boolean;
+  /**
+   * optional custom title of quickpic
+   */
+  title?: string;
 };
