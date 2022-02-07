@@ -94,7 +94,8 @@ export class DNodeUtils {
   }
 
   static basename(nodePath: string, rmExtension?: boolean) {
-    if (rmExtension) {
+    //skip for nodePath that has a sub-hierarchy starting with .md eg: learn.mdone.test, learn.md-one.new
+    if (rmExtension && nodePath.endsWith(".md")) {
       const idx = nodePath.lastIndexOf(".md");
       if (idx > 0) {
         nodePath = nodePath.slice(0, idx);
