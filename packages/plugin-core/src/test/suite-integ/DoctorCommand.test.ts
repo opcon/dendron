@@ -1,15 +1,18 @@
-import { NoteProps, NoteUtils, VaultUtils } from "@dendronhq/common-all";
+import { NoteUtils } from "@dendronhq/common-all";
 import { vault2Path } from "@dendronhq/common-server";
 import { AssertUtils, NoteTestUtilsV4 } from "@dendronhq/common-test-utils";
 import { DoctorActionsEnum } from "@dendronhq/engine-server";
-import { ENGINE_HOOKS } from "@dendronhq/engine-test-utils";
+import {
+  EngineTestUtilsUtils,
+  ENGINE_HOOKS,
+} from "@dendronhq/engine-test-utils";
 import fs from "fs-extra";
 import _ from "lodash";
+import { describe } from "mocha";
 import path from "path";
 import sinon from "sinon";
 import * as vscode from "vscode";
 import { DoctorCommand, PluginDoctorActionsEnum } from "../../commands/Doctor";
-import { ReloadIndexCommand } from "../../commands/ReloadIndex";
 import { INCOMPATIBLE_EXTENSIONS } from "../../constants";
 import { ExtensionProvider } from "../../ExtensionProvider";
 import { VSCodeUtils } from "../../vsCodeUtils";
@@ -22,137 +25,141 @@ import {
   setupBeforeAfter,
 } from "../testUtilsV3";
 
-suite("DoctorCommandTest", function () {
-  let ctx: vscode.ExtensionContext;
+async function runDoctor(
+  opts: { action: DoctorActionsEnum; scope: "file" | "workspace" },
+  cb: () => Promise<void>
+) {
+  const ext = ExtensionProvider.getExtension();
+  const cmd = new DoctorCommand(ext);
+  const gatherInputsStub = sinon
+    .stub(cmd, "gatherInputs")
+    .returns(Promise.resolve(opts));
+  const quickPickStub = sinon.stub(VSCodeUtils, "showQuickPick");
 
-  ctx = setupBeforeAfter(this, {});
+  try {
+    quickPickStub.onCall(0).returns(
+      // eslint-disable-next-line no-undef
+      Promise.resolve("proceed") as Thenable<vscode.QuickPickItem>
+    );
+    await cmd.run();
+    await cb();
+  } finally {
+    gatherInputsStub.restore();
+    quickPickStub.restore();
+  }
+}
 
-  test("basic", (done) => {
-    runLegacyMultiWorkspaceTest({
+suite("FIX_FRONTMATTER", function () {
+  const ctx = setupBeforeAfter(this);
+  const action = DoctorActionsEnum.FIX_FRONTMATTER;
+
+  describeMultiWS(
+    "GIVEN note with invalid frontmatter id",
+    {
+      preSetupHook: async (opts) => {
+        EngineTestUtilsUtils.TestDoctorUtils.createNotesWithBadIds(opts);
+      },
       ctx,
-      preSetupHook: ENGINE_HOOKS.setupBasic,
-      onInit: async ({ wsRoot, vaults }) => {
-        // create files without frontmatter
-        const vaultDirRoot = path.join(
-          wsRoot,
-          VaultUtils.getRelPath(vaults[0])
-        );
-        const testFile = path.join(vaultDirRoot, "bar.md");
-        fs.writeFileSync(testFile, "bar", { encoding: "utf8" });
-        const testFile2 = path.join(vaultDirRoot, "baz.md");
-        fs.writeFileSync(testFile2, "baz", { encoding: "utf8" });
-
-        // reload
-        await new ReloadIndexCommand().run();
-        const ext = ExtensionProvider.getExtension();
-        const cmd = new DoctorCommand(ext);
-        sinon.stub(cmd, "gatherInputs").returns(
-          Promise.resolve({
-            action: DoctorActionsEnum.FIX_FRONTMATTER,
+    },
+    () => {
+      test("THEN initializes correctly", async () => {
+        const { wsRoot, vaults } = ExtensionProvider.getDWorkspace();
+        await runDoctor(
+          {
+            action,
             scope: "workspace",
-          })
-        );
-        await cmd.run();
-        // check that frontmatter is added
-        const resp = fs.readFileSync(testFile, { encoding: "utf8" });
-        expect(NoteUtils.RE_FM.exec(resp)).toBeTruthy();
-        expect(NoteUtils.RE_FM_UPDATED.exec(resp)).toBeTruthy();
-        expect(NoteUtils.RE_FM_CREATED.exec(resp)).toBeTruthy();
-
-        const resp2 = fs.readFileSync(testFile2, { encoding: "utf8" });
-        expect(NoteUtils.RE_FM.exec(resp2)).toBeTruthy();
-        expect(NoteUtils.RE_FM_UPDATED.exec(resp2)).toBeTruthy();
-        expect(NoteUtils.RE_FM_CREATED.exec(resp2)).toBeTruthy();
-        done();
-      },
-    });
-  });
-
-  test("basic file scoped", (done) => {
-    runLegacyMultiWorkspaceTest({
-      ctx,
-      preSetupHook: ENGINE_HOOKS.setupBasic,
-      onInit: async ({ wsRoot, vaults }) => {
-        const vaultDirRoot = path.join(
-          wsRoot,
-          VaultUtils.getRelPath(vaults[0])
-        );
-        const testFile = path.join(vaultDirRoot, "bar.md");
-        fs.writeFileSync(testFile, "bar", { encoding: "utf8" });
-        const testFile2 = path.join(vaultDirRoot, "baz.md");
-        fs.writeFileSync(testFile2, "baz", { encoding: "utf8" });
-
-        // reload and run
-        await new ReloadIndexCommand().run();
-        const testFileUri = vscode.Uri.file(testFile);
-        await VSCodeUtils.openFileInEditor(testFileUri);
-        const ext = ExtensionProvider.getExtension();
-        const cmd = new DoctorCommand(ext);
-        sinon.stub(cmd, "gatherInputs").returns(
-          Promise.resolve({
-            action: DoctorActionsEnum.FIX_FRONTMATTER,
-            scope: "file",
-          })
-        );
-        await cmd.run();
-        // check that frontmatter is added
-        const resp = fs.readFileSync(testFile, { encoding: "utf8" });
-        expect(NoteUtils.RE_FM.exec(resp)).toBeTruthy();
-        expect(NoteUtils.RE_FM_UPDATED.exec(resp)).toBeTruthy();
-        expect(NoteUtils.RE_FM_CREATED.exec(resp)).toBeTruthy();
-
-        const resp2 = fs.readFileSync(testFile2, { encoding: "utf8" });
-        expect(NoteUtils.RE_FM.exec(resp2)).toBeFalsy();
-        expect(NoteUtils.RE_FM_UPDATED.exec(resp2)).toBeFalsy();
-        expect(NoteUtils.RE_FM_CREATED.exec(resp2)).toBeFalsy();
-        done();
-      },
-    });
-  });
-
-  test("fixes bad note id", (done) => {
-    let note: NoteProps;
-    runLegacyMultiWorkspaceTest({
-      ctx,
-      preSetupHook: async ({ wsRoot, vaults }) => {
-        note = await NoteTestUtilsV4.createNote({
-          wsRoot,
-          fname: "test",
-          vault: vaults[0],
-          props: {
-            id: "-bad-id",
           },
+          async () => {
+            const fname = "test";
+            const vault = vaults[0];
+            const fpath = path.join(
+              vault2Path({ vault, wsRoot }),
+              `${fname}.md`
+            );
+            expect(
+              await AssertUtils.assertInFile({ fpath, nomatch: ["-bad-id"] })
+            ).toBeTruthy();
+          }
+        );
+      });
+    }
+  );
+
+  describeMultiWS(
+    "GIVEN note with missing frontmatter",
+    {
+      preSetupHook: async (opts) => {
+        EngineTestUtilsUtils.TestDoctorUtils.createNotesWithNoFrontmatter(opts);
+        EngineTestUtilsUtils.TestDoctorUtils.createNotesWithNoFrontmatter({
+          ...opts,
+          fname: "test2",
         });
       },
-      onInit: async ({ wsRoot, engine, vaults }) => {
-        await WSUtils.openNote(note);
+      ctx,
+    },
+    () => {
+      describe("AND WHEN scope is file", () => {
+        test("THEN fix only open file", async () => {
+          const { wsRoot, vaults } = ExtensionProvider.getDWorkspace();
+          const fname = "test";
+          const vault = vaults[0];
+          const fpath = path.join(vault2Path({ vault, wsRoot }), `${fname}.md`);
+          const testFileUri = vscode.Uri.file(fpath);
+          await VSCodeUtils.openFileInEditor(testFileUri);
 
-        const ext = ExtensionProvider.getExtension();
-        const cmd = new DoctorCommand(ext);
-        sinon.stub(cmd, "gatherInputs").returns(
-          Promise.resolve({
-            action: DoctorActionsEnum.FIX_FRONTMATTER,
-            scope: "file",
-          })
-        );
-        await cmd.run();
-        note = NoteUtils.getNoteByFnameV5({
-          wsRoot,
-          notes: engine.notes,
-          fname: "test",
-          vault: vaults[0],
-        })!;
-        expect(note.id === "-bad-id").toBeFalsy();
-        done();
-      },
-    });
-  });
+          await runDoctor(
+            {
+              action,
+              scope: "file",
+            },
+            async () => {
+              expect(
+                await AssertUtils.assertInFile({ fpath, match: ["---", "id:"] })
+              ).toBeTruthy();
+              expect(
+                await AssertUtils.assertInFile({
+                  fpath: path.join(vault2Path({ vault, wsRoot }), "test2.md"),
+                  nomatch: ["---", "id:"],
+                })
+              ).toBeTruthy();
+            }
+          );
+        });
+      });
+      describe("AND WHEN scope is workspace", () => {
+        test("THEN fix all files", async () => {
+          const { wsRoot, vaults } = ExtensionProvider.getDWorkspace();
+          await runDoctor(
+            {
+              action,
+              scope: "workspace",
+            },
+            async () => {
+              const fname = "test";
+              const vault = vaults[0];
+              const fpath = path.join(
+                vault2Path({ vault, wsRoot }),
+                `${fname}.md`
+              );
+              expect(
+                await AssertUtils.assertInFile({ fpath, match: ["---", "id:"] })
+              ).toBeTruthy();
+              expect(
+                await AssertUtils.assertInFile({
+                  fpath: path.join(vault2Path({ vault, wsRoot }), "test2.md"),
+                  match: ["---", "id:"],
+                })
+              ).toBeTruthy();
+            }
+          );
+        });
+      });
+    }
+  );
 });
 
 suite("CREATE_MISSING_LINKED_NOTES", function () {
-  let ctx: vscode.ExtensionContext;
-
-  ctx = setupBeforeAfter(this);
+  const ctx = setupBeforeAfter(this);
 
   test("basic proceed, file scoped", (done) => {
     runLegacySingleWorkspaceTest({
