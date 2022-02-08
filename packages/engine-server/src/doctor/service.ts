@@ -12,6 +12,7 @@ import {
 import { createLogger } from "@dendronhq/common-server";
 import throttle from "@jcoreio/async-throttle";
 import _ from "lodash";
+import { BackfillService } from "../backfillV2";
 import { LinkUtils, RemarkUtils } from "../markdown/remark/utils";
 import { DendronASTDest } from "../markdown/types";
 import { MDUtilsV4 } from "../markdown/utils";
@@ -158,9 +159,11 @@ export class DoctorService {
     let doctorAction: (note: NoteProps) => Promise<any>;
     switch (action) {
       case DoctorActionsEnum.FIX_FRONTMATTER: {
-        console.log(
-          "the CLI currently doesn't support this action. please run this using the plugin"
-        );
+        await new BackfillService().updateNotes({
+          engine,
+          // fix notes with broken ids if necessary
+          overwriteFields: ["id"],
+        });
         return { exit };
       }
       // eslint-disable-next-line no-fallthrough
