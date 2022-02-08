@@ -159,10 +159,14 @@ export class DoctorService {
     let doctorAction: (note: NoteProps) => Promise<any>;
     switch (action) {
       case DoctorActionsEnum.FIX_FRONTMATTER: {
-        await new BackfillService().updateNotes({
+        const changed = await new BackfillService().updateNotes({
           engine,
           // fix notes with broken ids if necessary
           overwriteFields: ["id"],
+          dryRun,
+        });
+        this.L.info({
+          changed: changed.map((ent) => NoteUtils.toNoteLocString(ent.note)),
         });
         return { exit };
       }
